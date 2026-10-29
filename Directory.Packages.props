@@ -1,0 +1,21 @@
+<Project>
+
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CoreLibVersion>10.0.14</CoreLibVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Microsoft.Extensions.* (ConfigurationResolver.Configuration; Json for its integration tests only) -->
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="$(CoreLibVersion)" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Json" Version="$(CoreLibVersion)" />
+
+    <!-- Test infrastructure -->
+    <PackageVersion Include="coverlet.collector" Version="6.0.4" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageVersion Include="xunit" Version="2.9.3" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <PackageVersion Include="Xunit.SkippableFact" Version="1.5.85" />
+  </ItemGroup>
+
+</Project>

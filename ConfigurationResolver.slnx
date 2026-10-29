@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/ConfigurationResolver/ConfigurationResolver.csproj" />
+    <Project Path="src/ConfigurationResolver.Configuration/ConfigurationResolver.Configuration.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/ConfigurationResolver.IntegrationTests/ConfigurationResolver.IntegrationTests.csproj" />
+    <Project Path="tests/ConfigurationResolver.Tests/ConfigurationResolver.Tests.csproj" />
+  </Folder>
+</Solution>

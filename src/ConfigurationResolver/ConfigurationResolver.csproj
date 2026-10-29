@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Resolves ${key} items in text and UTF-8 bytes from dictionary, environment-variable and secret-file value providers, writing values straight into caller buffers that are wiped on failure.</Description>
+    <PackageTags>configuration;secrets;templating;resolver</PackageTags>
+  </PropertyGroup>
+
+</Project>
