@@ -9,17 +9,10 @@ using Microsoft.Extensions.Configuration;
 namespace ConfigurationResolver.IntegrationTests;
 
 /// <summary>
-/// The default <c>${</c> and <c>}</c> token.
+/// A token with custom start, end, and escape sequences.
 /// </summary>
-internal sealed class DefaultToken : ConfigurationItemTokenBase
-{
-}
-
-/// <summary>
-/// A token with custom start and end sequences.
-/// </summary>
-internal sealed class CustomToken(string startSequence, string endSequence)
-    : ConfigurationItemTokenBase(startSequence, endSequence)
+internal sealed class CustomToken(string startSequence, string endSequence, string? escapeSequence = null)
+    : ConfigurationItemTokenBase(startSequence, endSequence, escapeSequence)
 {
 }
 

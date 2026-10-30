@@ -22,6 +22,7 @@ using ConfigurationResolver.Buffers;
 using ConfigurationResolver.Providers;
 using ConfigurationResolver.Readers;
 using ConfigurationResolver.Resolvers;
+using ConfigurationResolver.Tokens;
 
 var template = "Host=db.internal;Password=${Database:Password}"u8;
 
@@ -87,3 +88,15 @@ To narrow this further:
 - Point `FileSecretValueProvider` at a directory that holds only the secrets this template needs.
 - With `IConfiguration`, pass a section (`configuration.GetSection("Database")`) instead of the
   root.
+
+## Items inside secret values
+
+With `MaxResolutionDepth` above 1, the resolver also resolves items inside values, including
+secrets. A secret value that contains `${` is then treated as a template:
+
+- Its keys must still be allowed by the reader, so a secret can't pull in a value the trusted
+  template didn't allow.
+- If a secret can legitimately contain `${`, keep the default depth of 1 for the resolver that
+  reads it. Otherwise it may be resolved, or fail with `NotAllowed` or `NotFound`.
+- While a value is resolved it is held in a pinned buffer that is wiped afterwards. It never
+  becomes a `string`, and if resolving fails the destination is wiped as usual.

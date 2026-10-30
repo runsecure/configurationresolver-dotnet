@@ -9,6 +9,7 @@ A value provider supplies the value for each key the resolver looks up. Every pr
 | `EnvironmentVariableValueProvider` | `ConfigurationResolver` | The process's environment variables | No |
 | `FileSecretValueProvider` | `ConfigurationResolver` | One file per key in a directory, such as `/run/secrets` | Yes |
 | `ConfigurationValueProvider` | `ConfigurationResolver.Configuration` | A Microsoft.Extensions.Configuration `IConfiguration` | No; see [Microsoft.Extensions.Configuration](microsoft-extensions-configuration.md) |
+| `CompositeValueProvider` | `ConfigurationResolver` | Several other providers, in priority order; see [Combining providers](#combining-providers) | Only as good as the provider that supplies the value |
 
 Providers built on strings can't protect secrets, because a `string` can't be wiped from memory.
 `FileSecretValueProvider` reads bytes straight from the file into the destination.
@@ -135,63 +136,32 @@ Rules for any provider:
 
 ## Combining providers
 
-A resolver takes a single provider. To look in several sources, try each in turn:
+A resolver can take several providers. Pass them in priority order, highest first. For each key,
+the resolver asks the providers in turn, and the first one that has the key supplies the value:
 
 ```csharp
-using ConfigurationResolver.Interfaces;
-
-public sealed class FirstFoundValueProvider(params IValueProvider[] providers) : IValueProvider
-{
-    public ValueStatus TryGetValue(string key, out string? value)
-    {
-        foreach (var provider in providers)
-        {
-            if (provider.TryGetValue(key, out value) == ValueStatus.Found)
-            {
-                return ValueStatus.Found;
-            }
-        }
-
-        value = null;
-        return ValueStatus.NotFound;
-    }
-
-    public ValueStatus TryGetChar(string key, Span<char> destination, out int charsWritten)
-    {
-        foreach (var provider in providers)
-        {
-            var status = provider.TryGetChar(key, destination, out charsWritten);
-            if (status != ValueStatus.NotFound)
-            {
-                return status;
-            }
-        }
-
-        charsWritten = 0;
-        return ValueStatus.NotFound;
-    }
-
-    public ValueStatus TryGetBytes(string key, Span<byte> destination, out int bytesWritten)
-    {
-        foreach (var provider in providers)
-        {
-            var status = provider.TryGetBytes(key, destination, out bytesWritten);
-            if (status != ValueStatus.NotFound)
-            {
-                return status;
-            }
-        }
-
-        bytesWritten = 0;
-        return ValueStatus.NotFound;
-    }
-}
-```
-
-```csharp
-var provider = new FirstFoundValueProvider(
+// Secret files win; anything they don't have comes from configuration.
+var resolver = new ConfigurationItemResolver(
+    token,
+    reader,
     new FileSecretValueProvider("/run/secrets"),
     new ConfigurationValueProvider(configuration));
 ```
 
-Put the provider you trust most first. A key found there is never looked up in the others.
+- A key found in one provider is never looked up in the ones after it.
+- If a provider has the key but its value doesn't fit in the destination, resolving fails. The
+  resolver doesn't fall back to a lower-priority value.
+- If no provider has the key, resolving throws `ConfigurationKeyException` with
+  `Error = NotFound`, unless `IgnoreUnresolvablePlaceholders` is set (see
+  [Getting started](getting-started.md#unresolvable-items)).
+- An exception thrown by a provider, such as `ValueUnstable` from `FileSecretValueProvider`, stops
+  resolving. The providers after it aren't asked.
+
+The same lookup is available on its own as `CompositeValueProvider`, for code that takes a single
+`IValueProvider`:
+
+```csharp
+var provider = new CompositeValueProvider(
+    new FileSecretValueProvider("/run/secrets"),
+    new ConfigurationValueProvider(configuration));
+```

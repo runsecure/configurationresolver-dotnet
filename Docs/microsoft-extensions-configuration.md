@@ -1,7 +1,7 @@
 # Using ConfigurationResolver with Microsoft.Extensions.Configuration
 
 ConfigurationResolver works with Microsoft.Extensions.Configuration (`IConfiguration`,
-`ConfigurationBuilder`, `appsettings.json`) in two ways, and you can use them together:
+`ConfigurationBuilder`, `appsettings.json`) in three ways, and you can use them together:
 
 1. **Resolve a configuration file before loading it.** Ship `appsettings.template.json` with
    `${...}` items in it, fill the values in from environment variables or secret files, then
@@ -9,16 +9,21 @@ ConfigurationResolver works with Microsoft.Extensions.Configuration (`IConfigura
 2. **Use `IConfiguration` as the source of values.** `ConfigurationValueProvider` looks keys up in
    an `IConfigurationRoot` or a section, so `${Database:Host}` reads `Database:Host` from your
    configuration.
+3. **Resolve items inside configuration values as they are read.** `ResolvingConfigurationRoot`
+   wraps a built configuration, so a value such as `Server=${Database:Host}` in `appsettings.json`
+   reads as `Server=db.internal`, the way Spring Boot resolves `${...}` in properties.
 
 The integration tests in
 [JsonConfigurationScenarioTests.cs](../tests/ConfigurationResolver.IntegrationTests/JsonConfigurationScenarioTests.cs)
-cover both.
+and
+[ResolvingConfigurationRootScenarioTests.cs](../tests/ConfigurationResolver.IntegrationTests/ResolvingConfigurationRootScenarioTests.cs)
+cover them.
 
 ## Install
 
 ```bash
 dotnet add package ConfigurationResolver
-dotnet add package ConfigurationResolver.Configuration   # only needed for ConfigurationValueProvider
+dotnet add package ConfigurationResolver.Configuration   # for ConfigurationValueProvider and ResolvingConfigurationRoot
 dotnet add package Microsoft.Extensions.Configuration.Json
 dotnet add package Microsoft.Extensions.Configuration.EnvironmentVariables   # for AddEnvironmentVariables()
 ```
@@ -45,6 +50,7 @@ result to the configuration:
 using ConfigurationResolver.Providers;
 using ConfigurationResolver.Readers;
 using ConfigurationResolver.Resolvers;
+using ConfigurationResolver.Tokens;
 using Microsoft.Extensions.Configuration;
 
 var templatePath = Path.Combine(AppContext.BaseDirectory, "appsettings.template.json");
@@ -82,7 +88,9 @@ Notes:
 - **`AddJsonStream` reads the stream once,** when `Build()` is called. Unlike `AddJsonFile`, it
   doesn't reload. To pick up changed secrets, resolve again and build a new configuration.
 - **Missing values fail at startup.** If the template names a key that has no value, `Resolve`
-  throws `ConfigurationKeyException` with `Error = NotFound` before anything is loaded.
+  throws `ConfigurationKeyException` with `Error = NotFound` before anything is loaded. To load the
+  file anyway, set `IgnoreUnresolvablePlaceholders = true` on the resolver. The item then stays in
+  the loaded configuration as written, so `${Greeting}` is the value of `Greeting`.
 
 ### In an ASP.NET Core or generic host
 
@@ -120,6 +128,7 @@ list win.
 using ConfigurationResolver.Configuration;
 using ConfigurationResolver.Readers;
 using ConfigurationResolver.Resolvers;
+using ConfigurationResolver.Tokens;
 using Microsoft.Extensions.Configuration;
 
 // values.json: { "Database": { "Host": "db.internal", "Port": "5432" } }
@@ -177,9 +186,9 @@ and resolve them into a `SecretBuffer<T>` if they must stay out of strings. See
 ## Combining both scenarios
 
 A common setup keeps a single template that takes passwords from secret files and everything else
-from ordinary configuration. A resolver uses one provider, so combine the two with a provider that
-tries each source in turn. `FirstFoundValueProvider` is a short class you add to your app;
-[Value providers](value-providers.md#combining-providers) has its code.
+from ordinary configuration. Pass both providers to the resolver, highest priority first. For each
+key, the first provider that has it supplies the value; see
+[Combining providers](value-providers.md#combining-providers).
 
 ```csharp
 var settings = new ConfigurationBuilder()
@@ -193,10 +202,11 @@ var reader = new ConfigurationItemReader(token);
 reader.ReadKeys(template);
 
 // Secret files win; anything they don't have comes from configuration.
-var provider = new FirstFoundValueProvider(
+var resolver = new ConfigurationItemResolver(
+    token,
+    reader,
     new FileSecretValueProvider("/run/secrets"),
     new ConfigurationValueProvider(settings));
-var resolver = new ConfigurationItemResolver(token, reader, provider);
 
 var resolved = new byte[64 * 1024];
 var written = resolver.Resolve(template, resolved);
@@ -206,6 +216,73 @@ var configuration = new ConfigurationBuilder()
     .AddJsonStream(new MemoryStream(resolved, 0, written, writable: false))
     .Build();
 ```
+
+## Scenario 3: resolve items inside configuration values with `ResolvingConfigurationRoot`
+
+`appsettings.json` can refer to other settings and to secrets directly:
+
+```json
+{
+  "Database": { "Host": "db.internal", "Port": "5432" },
+  "ConnectionStrings": {
+    "Default": "Host=${Database:Host};Port=${Database:Port};Password=${Database:Password}"
+  },
+  "Api": { "Url": "https://${Api:Host}/v1", "Host": "api.${Region}" },
+  "Region": "eu"
+}
+```
+
+Build the configuration as usual, then wrap it:
+
+```csharp
+using ConfigurationResolver.Builders;
+using ConfigurationResolver.Configuration;
+using ConfigurationResolver.Providers;
+using ConfigurationResolver.Readers;
+using ConfigurationResolver.Tokens;
+using Microsoft.Extensions.Configuration;
+
+var inner = new ConfigurationBuilder()
+    .AddJsonFile("appsettings.json")
+    .AddEnvironmentVariables()
+    .Build();
+
+var token = new DefaultToken();
+var reader = new ConfigurationItemReader(token);   // the root fills it in
+var resolver = new ConfigurationResolverBuilder()
+    .WithToken(token)
+    .WithReader(reader)
+    .AddValueProvider(new FileSecretValueProvider("/run/secrets"))   // secrets win
+    .AddValueProvider(new ConfigurationValueProvider(inner))         // then other settings
+    .WithMaxResolutionDepth(2)   // Api:Url -> Api:Host -> Region
+    .Build();
+
+var configuration = new ResolvingConfigurationRoot(inner, reader, resolver);
+
+Console.WriteLine(configuration["ConnectionStrings:Default"]);   // Host=db.internal;Port=5432;Password=<secret file>
+Console.WriteLine(configuration.GetSection("Api")["Url"]);       // https://api.eu/v1
+```
+
+How it behaves:
+
+- **Values are resolved each time they are read,** through the indexer, `GetSection`,
+  `GetChildren`, `AsEnumerable` and anything built on them.
+- **The allowlist comes from the configuration itself.** The root reads every key referenced in
+  the inner configuration's values into the reader when it is created. When a value refers to a
+  key the reader doesn't have, such as after a reload, it reads them again and retries once. A
+  value from a value provider, such as a secret file, can only refer to keys that some
+  configuration value refers to. Pass the reader the resolver uses.
+- **Give the providers the inner configuration,** `new ConfigurationValueProvider(inner)`, not the
+  resolving root. Use `WithMaxResolutionDepth` to resolve settings that refer to settings that
+  contain items, as `Api:Url` does above.
+- **Setting a value** stores it unresolved in the inner configuration:
+  `configuration["X"] = "${Region}"` reads back as `eu`.
+- **Errors surface when a value is read.** A missing value throws `ConfigurationKeyException` with
+  `NotFound`, unless the resolver ignores unresolvable placeholders. A loop throws `Cycle`.
+- **Write `$${` for a literal `${`** in a value: `"$${Database:Host}"` reads as `${Database:Host}`.
+- `Providers`, `Reload()` and `GetReloadToken()` are those of the inner configuration.
+- **Not for secrets that must stay out of strings.** Every value read through the root is a
+  `string`, including any secret it pulls in. See [Handling secrets](secrets.md).
 
 ## Troubleshooting
 

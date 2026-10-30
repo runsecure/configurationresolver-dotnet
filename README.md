@@ -24,6 +24,14 @@ The tests for secret files behind real symbolic links are skipped on Windows unl
 can be created (Developer Mode or an elevated prompt). CI also runs every test on Linux, where they
 always run.
 
+The unit and integration tests together cover every line and branch of both packages. To check
+coverage locally, collect it and read the Cobertura reports, one per test project, in
+`artifacts/test-results`:
+
+```bash
+dotnet test ConfigurationResolver.slnx --collect:"XPlat Code Coverage" --results-directory artifacts/test-results
+```
+
 ## Versioning
 
 The version of the next release is `VersionPrefix` in `Directory.Build.props`, currently

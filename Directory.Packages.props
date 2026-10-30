@@ -7,6 +7,7 @@
 
   <ItemGroup>
     <!-- Microsoft.Extensions.* (ConfigurationResolver.Configuration; Json for its integration tests only) -->
+    <PackageVersion Include="Microsoft.Extensions.Configuration" Version="$(CoreLibVersion)" />
     <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="$(CoreLibVersion)" />
     <PackageVersion Include="Microsoft.Extensions.Configuration.Json" Version="$(CoreLibVersion)" />
 

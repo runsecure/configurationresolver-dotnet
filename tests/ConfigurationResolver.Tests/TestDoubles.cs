@@ -7,10 +7,10 @@ using ConfigurationResolver.Tokens;
 namespace ConfigurationResolver.Tests;
 
 /// <summary>
-/// A token with custom start and end sequences.
+/// A token with custom start, end, and escape sequences.
 /// </summary>
-internal sealed class CustomToken(string startSequence, string endSequence)
-    : ConfigurationItemTokenBase(startSequence, endSequence)
+internal sealed class CustomToken(string startSequence, string endSequence, string? escapeSequence = null)
+    : ConfigurationItemTokenBase(startSequence, endSequence, escapeSequence)
 {
 }
 
@@ -19,26 +19,44 @@ internal sealed class CustomToken(string startSequence, string endSequence)
 /// </summary>
 internal sealed class ReadingResolver : IConfigurationResolver
 {
+    private readonly ConfigurationItemTokenBase _token;
+    private readonly IValueProvider[] _valueProviders;
     private readonly ConfigurationItemReader _reader;
-    private readonly ConfigurationItemResolver _resolver;
+    private ConfigurationItemResolver? _resolver;
 
-    public ReadingResolver(ConfigurationItemTokenBase token, IValueProvider valueProvider)
+    public ReadingResolver(ConfigurationItemTokenBase token, params IValueProvider[] valueProviders)
     {
+        _token = token;
+        _valueProviders = valueProviders;
         _reader = new ConfigurationItemReader(token);
-        _resolver = new ConfigurationItemResolver(token, _reader, valueProvider);
     }
+
+    public bool IgnoreUnresolvablePlaceholders { get; init; }
+
+    public int MaxResolutionDepth { get; init; } = 1;
+
+    /// <summary>
+    /// Gets texts whose keys are allowed as well as the source's, such as the keys of items inside values.
+    /// </summary>
+    public string[] AlsoAllowed { get; init; } = [];
 
     public int Resolve(ReadOnlySpan<char> source, Span<char> destination)
     {
-        _reader.ReadKeys(source);
-        return _resolver.Resolve(source, destination);
+        _reader.ReadKeys([source.ToString(), .. AlsoAllowed]);
+        return Resolver.Resolve(source, destination);
     }
 
     public int Resolve(ReadOnlySpan<byte> source, Span<byte> destination)
     {
-        _reader.ReadKeys(source);
-        return _resolver.Resolve(source, destination);
+        _reader.ReadKeys([Encoding.UTF8.GetString(source), .. AlsoAllowed]);
+        return Resolver.Resolve(source, destination);
     }
+
+    private ConfigurationItemResolver Resolver => _resolver ??= new ConfigurationItemResolver(_token, _reader, _valueProviders)
+    {
+        IgnoreUnresolvablePlaceholders = IgnoreUnresolvablePlaceholders,
+        MaxResolutionDepth = MaxResolutionDepth,
+    };
 }
 
 /// <summary>

@@ -4,6 +4,7 @@ using ConfigurationResolver.Interfaces;
 using ConfigurationResolver.Providers;
 using ConfigurationResolver.Readers;
 using ConfigurationResolver.Resolvers;
+using ConfigurationResolver.Tokens;
 
 namespace ConfigurationResolver.Tests;
 
@@ -48,7 +49,6 @@ public class ConfigurationItemResolverTests
         "start ${Name",
         "} stray end }",
         "$ {Name} $Name {Name}",
-        "$${",
     };
 
     public static TheoryData<string, string> PartiallyResolvedText => new()
@@ -211,7 +211,140 @@ public class ConfigurationItemResolverTests
         var exception = Assert.Throws<ArgumentNullException>(
             () => new ConfigurationItemResolver(new DefaultToken(), new ConfigurationItemReader(new DefaultToken()), null!));
 
-        Assert.Equal("valueProvider", exception.ParamName);
+        Assert.Equal("valueProviders", exception.ParamName);
+    }
+
+    [Fact]
+    public void Constructor_NoValueProviders_Throws()
+    {
+        Assert.Throws<ArgumentException>(
+            () => new ConfigurationItemResolver(new DefaultToken(), new ConfigurationItemReader(new DefaultToken())));
+    }
+
+    [Fact]
+    public void Constructor_NullAmongValueProviders_Throws()
+    {
+        Assert.Throws<ArgumentException>(
+            () => new ConfigurationItemResolver(
+                new DefaultToken(), new ConfigurationItemReader(new DefaultToken()), new DictionaryValueProvider(Values), null!));
+    }
+
+    [Fact]
+    public void Resolve_MultipleProviders_UsesTheFirstProviderThatHasTheKey()
+    {
+        var high = new SpyValueProvider(new Dictionary<string, string> { ["Name"] = "Grace" });
+        var low = new SpyValueProvider(Values);
+        var resolver = new ReadingResolver(new DefaultToken(), high, low);
+
+        Assert.Equal("Grace p@ss", ResolveChars(resolver, "${Name} ${Db:Password}"));
+        Assert.Equal("Grace p@ss", ResolveBytes(resolver, "${Name} ${Db:Password}"));
+
+        Assert.Equal(["Name", "Db:Password"], high.TryGetCharCalls);
+        Assert.Equal(["Db:Password"], low.TryGetCharCalls);
+        Assert.Equal(["Name", "Db:Password"], high.TryGetBytesCalls);
+        Assert.Equal(["Db:Password"], low.TryGetBytesCalls);
+    }
+
+    [Fact]
+    public void Resolve_MultipleProviders_NoneHasTheKey_ThrowsNotFound()
+    {
+        var resolver = new ReadingResolver(
+            new DefaultToken(),
+            new DictionaryValueProvider(new Dictionary<string, string> { ["Name"] = "Grace" }),
+            new DictionaryValueProvider(Values));
+
+        var charException = Assert.Throws<ConfigurationKeyException>(() => ResolveChars(resolver, "${Name} ${missing}"));
+        var byteException = Assert.Throws<ConfigurationKeyException>(() => ResolveBytes(resolver, "${Name} ${missing}"));
+
+        AssertKeyException(charException, "missing", ConfigurationKeyError.NotFound, 8);
+        AssertKeyException(byteException, "missing", ConfigurationKeyError.NotFound, 8);
+    }
+
+    [Fact]
+    public void Resolve_MultipleProviders_ValueTooLargeInTheFirstProvider_DoesNotFallThrough()
+    {
+        var high = new DictionaryValueProvider(new Dictionary<string, string> { ["Name"] = "Grace Hopper" });
+        var low = new SpyValueProvider(Values);
+        var resolver = new ReadingResolver(new DefaultToken(), high, low);
+
+        Assert.Throws<ArgumentException>(() => ResolveChars(resolver, "${Name}", destinationLength: 5));
+        Assert.Throws<ArgumentException>(() => ResolveBytes(resolver, "${Name}", destinationLength: 5));
+
+        Assert.Empty(low.TryGetCharCalls);
+        Assert.Empty(low.TryGetBytesCalls);
+    }
+
+    [Theory]
+    [InlineData("${missing}", "${missing}")]
+    [InlineData("a ${ missing } b ${Name}", "a ${ missing } b Ada")]
+    [InlineData("${Name}${missing}${Name}", "Ada${missing}Ada")]
+    [InlineData("é ${missing} ${Unicode}", "é ${missing} café")]
+    public void Resolve_IgnoreUnresolvablePlaceholders_CopiesMissingItemsUnchanged(string source, string expected)
+    {
+        var resolver = new ReadingResolver(new DefaultToken(), new DictionaryValueProvider(Values)) { IgnoreUnresolvablePlaceholders = true };
+
+        Assert.Equal(expected, ResolveChars(resolver, source));
+        Assert.Equal(expected, ResolveBytes(resolver, source));
+    }
+
+    [Fact]
+    public void Resolve_IgnoreUnresolvablePlaceholders_CopiesTheTokensOwnSequences()
+    {
+        var resolver = new ReadingResolver(new CustomToken("{{", "}}"), new DictionaryValueProvider(Values)) { IgnoreUnresolvablePlaceholders = true };
+
+        Assert.Equal("Ada {{ missing }}", ResolveChars(resolver, "{{Name}} {{ missing }}"));
+        Assert.Equal("Ada {{ missing }}", ResolveBytes(resolver, "{{Name}} {{ missing }}"));
+    }
+
+    [Fact]
+    public void Resolve_IgnoreUnresolvablePlaceholders_KeyNotReadByTheReader_StillThrows()
+    {
+        var reader = new ConfigurationItemReader(new DefaultToken());
+        var spy = new SpyValueProvider(Values);
+        var resolver = new ConfigurationItemResolver(new DefaultToken(), reader, spy) { IgnoreUnresolvablePlaceholders = true };
+        reader.ReadKeys("${Name}");
+
+        var exception = Assert.Throws<ConfigurationKeyException>(() => ResolveChars(resolver, "${Name} ${Db:Password}"));
+
+        AssertKeyException(exception, "Db:Password", ConfigurationKeyError.NotAllowed, 8);
+        Assert.Equal(["Name"], spy.TryGetCharCalls);
+    }
+
+    [Fact]
+    public void Resolve_IgnoreUnresolvablePlaceholders_ProviderErrorStillPropagates()
+    {
+        var spy = new SpyValueProvider(Values) { ThrowOnLookup = new ConfigurationKeyException("Name", ConfigurationKeyError.ValueUnstable) };
+        var resolver = new ReadingResolver(new DefaultToken(), spy) { IgnoreUnresolvablePlaceholders = true };
+
+        var exception = Assert.Throws<ConfigurationKeyException>(() => ResolveChars(resolver, "${Name}"));
+
+        Assert.Equal(ConfigurationKeyError.ValueUnstable, exception.Error);
+    }
+
+    [Theory]
+    [InlineData(9)]
+    [InlineData(13)]
+    public void Resolve_IgnoreUnresolvablePlaceholders_DestinationTooSmallForTheItem_ThrowsAndClearsDestination(int destinationLength)
+    {
+        var resolver = new ReadingResolver(new DefaultToken(), new DictionaryValueProvider(Values)) { IgnoreUnresolvablePlaceholders = true };
+        var chars = Filled('#', destinationLength);
+        var bytes = Filled((byte)'#', destinationLength);
+
+        var charException = Assert.Throws<ArgumentException>(() => resolver.Resolve("Ada ${missing}", chars));
+        var byteException = Assert.Throws<ArgumentException>(() => resolver.Resolve("Ada ${missing}"u8, bytes));
+
+        Assert.Equal("destination", charException.ParamName);
+        Assert.Equal("destination", byteException.ParamName);
+        Assert.All(chars, c => Assert.Equal('\0', c));
+        Assert.All(bytes, b => Assert.Equal(0, b));
+    }
+
+    [Fact]
+    public void Resolve_IgnoreUnresolvablePlaceholders_IsOffByDefault()
+    {
+        var resolver = new ConfigurationItemResolver(new DefaultToken(), new ConfigurationItemReader(new DefaultToken()), new DictionaryValueProvider(Values));
+
+        Assert.False(resolver.IgnoreUnresolvablePlaceholders);
     }
 
     [Fact]
@@ -349,6 +482,174 @@ public class ConfigurationItemResolverTests
 
         Assert.All(chars, c => Assert.Equal('\0', c));
         Assert.All(bytes, b => Assert.Equal(0, b));
+    }
+
+    [Theory]
+    [InlineData("$${Name}", "${Name}")]
+    [InlineData("$${", "${")]
+    [InlineData("$${Name} is ${Name}", "${Name} is Ada")]
+    [InlineData("$$${Name}", "$${Name}")]
+    [InlineData("$${a ${Name}}", "${a Ada}")]
+    [InlineData("$ ${Name} $$", "$ Ada $$")]
+    [InlineData("é $${Unicode}", "é ${Unicode}")]
+    public void Resolve_EscapedStartSequence_IsCopiedWithoutTheEscape(string source, string expected)
+    {
+        Assert.Equal(expected, ResolveChars(_resolver, source));
+        Assert.Equal(expected, ResolveBytes(_resolver, source));
+    }
+
+    [Fact]
+    public void Resolve_EscapedItem_IsNotAKeySoItNeedsNoPermission()
+    {
+        var (reader, resolver, spy) = CreateAllowListed();
+        reader.ReadKeys("${Name}");
+
+        Assert.Equal("Ada ${Db:Password}", ResolveChars(resolver, "${Name} $${Db:Password}"));
+        Assert.Equal("Ada ${Db:Password}", ResolveBytes(resolver, "${Name} $${Db:Password}"));
+
+        Assert.Equal(["Name"], spy.TryGetCharCalls);
+        Assert.Equal(["Name"], spy.TryGetBytesCalls);
+    }
+
+    [Theory]
+    [InlineData(null, "${{Name}} \\{{Name}}", "$Ada \\Ada")]
+    [InlineData("\\", "${{Name}} \\{{Name}}", "$Ada {{Name}}")]
+    public void Resolve_UsesTheTokensEscapeSequence(string? escape, string source, string expected)
+    {
+        var resolver = new ReadingResolver(new CustomToken("{{", "}}", escape), new DictionaryValueProvider(Values));
+
+        Assert.Equal(expected, ResolveChars(resolver, source));
+        Assert.Equal(expected, ResolveBytes(resolver, source));
+    }
+
+    [Fact]
+    public void MaxResolutionDepth_DefaultsToOne_AndMustBePositive()
+    {
+        var resolver = new ConfigurationItemResolver(new DefaultToken(), new ConfigurationItemReader(new DefaultToken()), new DictionaryValueProvider(Values));
+
+        Assert.Equal(1, resolver.MaxResolutionDepth);
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => new ConfigurationItemResolver(new DefaultToken(), new ConfigurationItemReader(new DefaultToken()), new DictionaryValueProvider(Values))
+            {
+                MaxResolutionDepth = 0,
+            });
+    }
+
+    [Theory]
+    [InlineData(1, "${Url}", "https://${Host}:${Port}/")]
+    [InlineData(2, "${Url}", "https://${Region}.db.internal:5432/")]
+    [InlineData(3, "${Url}", "https://eu.db.internal:5432/")]
+    [InlineData(10, "go ${Url} now", "go https://eu.db.internal:5432/ now")]
+    [InlineData(1, "${Escaped}", "$${Region}")]
+    [InlineData(2, "${Escaped}", "${Region}")]
+    [InlineData(2, "${Ping}", "${Ping}")]
+    [InlineData(2, "${Port}${Host}", "5432eu.db.internal")]
+    public void Resolve_ItemsInValues_AreResolvedUpToTheMaximumDepth(int depth, string source, string expected)
+    {
+        var resolver = CreateNested(depth);
+
+        Assert.Equal(expected, ResolveChars(resolver, source));
+        Assert.Equal(expected, ResolveBytes(resolver, source));
+    }
+
+    [Theory]
+    [InlineData(2, "${Self}", "Self", 0)]
+    [InlineData(5, "x ${Self}", "Self", 2)]
+    [InlineData(3, "${Ping}", "Ping", 0)]
+    [InlineData(10, "ab ${Pong}", "Pong", 3)]
+    public void Resolve_ValueThatLeadsBackToItsKey_ThrowsCycleAndClearsDestination(int depth, string source, string key, int sourceIndex)
+    {
+        var resolver = CreateNested(depth);
+        var chars = Filled('#', 256);
+        var bytes = Filled((byte)'#', 256);
+
+        var charException = Assert.Throws<ConfigurationKeyException>(() => resolver.Resolve(source, chars));
+        var byteException = Assert.Throws<ConfigurationKeyException>(() => resolver.Resolve(Encoding.UTF8.GetBytes(source), bytes));
+
+        AssertKeyException(charException, key, ConfigurationKeyError.Cycle, sourceIndex);
+        AssertKeyException(byteException, key, ConfigurationKeyError.Cycle, sourceIndex);
+        Assert.All(chars, c => Assert.Equal('\0', c));
+        Assert.All(bytes, b => Assert.Equal(0, b));
+    }
+
+    [Fact]
+    public void Resolve_KeyInAValue_MustBeAllowed()
+    {
+        var spy = new SpyValueProvider(Nested);
+        var resolver = new ReadingResolver(new DefaultToken(), spy) { MaxResolutionDepth = 3 };
+
+        var exception = Assert.Throws<ConfigurationKeyException>(() => ResolveChars(resolver, "go ${Host}"));
+
+        AssertKeyException(exception, "Region", ConfigurationKeyError.NotAllowed, 3);
+        Assert.Equal(["Host"], spy.TryGetCharCalls);
+    }
+
+    [Fact]
+    public void Resolve_MissingKeyInAValue_ThrowsWithTheSourceItemsIndex_OrIsKeptWhenIgnored()
+    {
+        var strict = CreateNested(2);
+        var lenient = new ReadingResolver(new DefaultToken(), new DictionaryValueProvider(Nested))
+        {
+            MaxResolutionDepth = 2,
+            IgnoreUnresolvablePlaceholders = true,
+            AlsoAllowed = NestedKeys,
+        };
+
+        var exception = Assert.Throws<ConfigurationKeyException>(() => ResolveBytes(strict, "é ${Missing}"));
+
+        AssertKeyException(exception, "Nope", ConfigurationKeyError.NotFound, 3);
+        Assert.Equal("é [${ Nope }]", ResolveChars(lenient, "é ${Missing}"));
+        Assert.Equal("é [${ Nope }]", ResolveBytes(lenient, "é ${Missing}"));
+    }
+
+    [Fact]
+    public void Resolve_ValueThatShrinksWhenResolved_LeavesNoTraceOfTheRawValue()
+    {
+        var resolver = CreateNested(2);
+        var chars = Filled('#', 64);
+        var bytes = Filled((byte)'#', 64);
+
+        var charsWritten = resolver.Resolve("${Shrinks}", chars);
+        var bytesWritten = resolver.Resolve("${Shrinks}"u8, bytes);
+
+        Assert.Equal("eu!", new string(chars, 0, charsWritten));
+        Assert.Equal("eu!", Encoding.UTF8.GetString(bytes, 0, bytesWritten));
+        Assert.DoesNotContain("Region", new string(chars));
+        Assert.DoesNotContain("Region", Encoding.UTF8.GetString(bytes));
+        Assert.Equal(new string('#', 64 - "${Region}!".Length), new string(chars, "${Region}!".Length, 64 - "${Region}!".Length));
+    }
+
+    [Fact]
+    public void Resolve_ItemsInValues_AreWrittenWithoutReadingValuesAsStrings()
+    {
+        var spy = new SpyValueProvider(Nested);
+        var resolver = new ReadingResolver(new DefaultToken(), spy) { MaxResolutionDepth = 3, AlsoAllowed = NestedKeys };
+
+        Assert.Equal("https://eu.db.internal:5432/", ResolveChars(resolver, "${Url}"));
+
+        Assert.Equal(["Url", "Host", "Region", "Port"], spy.TryGetCharCalls);
+        Assert.Empty(spy.TryGetValueCalls);
+    }
+
+    private static readonly Dictionary<string, string> Nested = new()
+    {
+        ["Url"] = "https://${Host}:${Port}/",
+        ["Host"] = "${Region}.db.internal",
+        ["Region"] = "eu",
+        ["Port"] = "5432",
+        ["Self"] = "a${Self}",
+        ["Ping"] = "${Pong}",
+        ["Pong"] = "${Ping}",
+        ["Escaped"] = "$${Region}",
+        ["Missing"] = "[${ Nope }]",
+        ["Shrinks"] = "${Region}!",
+    };
+
+    private static readonly string[] NestedKeys = [.. Nested.Values];
+
+    private static ReadingResolver CreateNested(int depth)
+    {
+        return new ReadingResolver(new DefaultToken(), new DictionaryValueProvider(Nested)) { MaxResolutionDepth = depth, AlsoAllowed = NestedKeys };
     }
 
     private static void AssertKeyException(ConfigurationKeyException exception, string key, ConfigurationKeyError error, int sourceIndex)
