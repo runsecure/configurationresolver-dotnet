@@ -1,6 +1,11 @@
 # configurationresolver-dotnet
 A simple configuration resolver for dotnet
 
+## Documentation
+
+How-to guides are in [Docs](Docs/README.md), including
+[using ConfigurationResolver with Microsoft.Extensions.Configuration](Docs/microsoft-extensions-configuration.md).
+
 ## Building
 
 ```bash
