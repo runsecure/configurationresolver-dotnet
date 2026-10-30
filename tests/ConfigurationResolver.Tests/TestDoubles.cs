@@ -7,13 +7,6 @@ using ConfigurationResolver.Tokens;
 namespace ConfigurationResolver.Tests;
 
 /// <summary>
-/// The default <c>${</c> and <c>}</c> token.
-/// </summary>
-internal sealed class DefaultToken : ConfigurationItemTokenBase
-{
-}
-
-/// <summary>
 /// A token with custom start and end sequences.
 /// </summary>
 internal sealed class CustomToken(string startSequence, string endSequence)
