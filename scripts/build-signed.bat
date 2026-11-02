@@ -5,7 +5,7 @@ rem artifacts\packages, and verify the signatures inside every package.
 rem Needs no elevation, but does need an Azure sign-in (az login) for an
 rem account with the Artifact Signing Certificate Profile Signer role.
 rem Arguments are forwarded, e.g.:
-rem   build-signed.bat                      (version 0.9.0, from Directory.Build.props)
+rem   build-signed.bat                      (version 0.9.1, from Directory.Build.props)
 rem   build-signed.bat -Version 0.9.0-rc.1 -SkipTests
 
 setlocal

@@ -35,8 +35,8 @@ dotnet test ConfigurationResolver.slnx --collect:"XPlat Code Coverage" --results
 ## Versioning
 
 The version of the next release is `VersionPrefix` in `Directory.Build.props`, currently
-**0.9.0**. A `0.x` version marks the API as pre-release: it may still change before 1.0. CI builds
-are versioned `0.9.0-ci.<run number>`.
+**0.9.1**. A `0.x` version marks the API as pre-release: it may still change before 1.0. CI builds
+are versioned `0.9.1-ci.<run number>`.
 
 ## Signing and releases
 
@@ -60,8 +60,8 @@ from strong naming, which these assemblies don't use.
 ### Cutting a release
 
 ```bash
-git tag v0.9.0
-git push origin v0.9.0
+git tag v0.9.1
+git push origin v0.9.1
 ```
 
 The tag must be `vMAJOR.MINOR.PATCH`, optionally with a pre-release suffix (`v0.9.0-rc.1`), and its
@@ -81,7 +81,7 @@ The tag must be `vMAJOR.MINOR.PATCH`, optionally with a pre-release suffix (`v0.
    nuget.org through Trusted Publishing: GitHub's OIDC token is exchanged for a short-lived
    nuget.org key, so no nuget.org secret is stored. It runs last because a version on
    nuget.org can be unlisted but never deleted or replaced. nuget.org treats only versions with a
-   pre-release suffix as pre-releases, so `0.9.0` is listed there as stable.
+   pre-release suffix as pre-releases, so `0.9.1` is listed there as stable.
 
 ### Signing locally
 

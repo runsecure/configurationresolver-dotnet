@@ -10,7 +10,7 @@
        CI and release builds override it with -p:Version; a release tag's version must match it
        (see scripts/ConfigurationResolverPackaging.ps1). -->
   <PropertyGroup>
-    <VersionPrefix>0.9.0</VersionPrefix>
+    <VersionPrefix>0.9.1</VersionPrefix>
   </PropertyGroup>
 
   <!-- Every package is licensed under the Mozilla Public License 2.0 (see LICENSE). -->
