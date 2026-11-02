@@ -25,7 +25,7 @@
 # The packages themselves are NOT NuGet-signed (see README.md, "Signing and
 # releases"): the assemblies inside them are Authenticode-signed.
 #
-# To cut a release: git tag v0.9.0; git push origin v0.9.0
+# To cut a release: git tag v0.9.1; git push origin v0.9.1
 # Any v0.x.y tag, and any tag with a pre-release suffix, is published as a
 # GitHub pre-release.
 #
