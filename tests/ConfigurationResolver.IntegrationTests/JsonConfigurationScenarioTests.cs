@@ -184,6 +184,44 @@ public sealed class JsonConfigurationScenarioTests : IDisposable
     }
 
     [Fact]
+    public void SecretFilesThenConfiguration_TheFirstProviderWithTheKeyWins()
+    {
+        // The password and an overriding host come from secret files; everything else from configuration.
+        var secrets = Path.Combine(_directory.Path, "secrets");
+        Directory.CreateDirectory(secrets);
+        File.WriteAllText(Path.Combine(secrets, "Database__Password"), "s3cr\\\"t!");
+        File.WriteAllText(Path.Combine(secrets, "Database__Host"), "db.secret");
+        var settings = new ConfigurationBuilder().AddJsonFile(_directory.WriteText("values.json", ValuesJson())).Build();
+        var templatePath = _directory.WriteText("appsettings.template.json", Template);
+        var reader = new ConfigurationItemReader(new DefaultToken());
+        reader.ReadKeys(File.ReadAllBytes(templatePath));
+        var resolver = new ConfigurationItemResolver(
+            new DefaultToken(), reader, new FileSecretValueProvider(secrets), new ConfigurationValueProvider(settings));
+
+        var configuration = TemplateFile.LoadJson(TemplateFile.ResolveBytes(resolver, templatePath));
+
+        Assert.Equal("Host=db.secret;Port=5432;Password=s3cr\"t!", configuration["ConnectionStrings:Default"]);
+        Assert.Equal("héllo wörld", configuration["Greeting"]);
+    }
+
+    [Fact]
+    public void IgnoreUnresolvablePlaceholders_LeavesMissingItemsInTheLoadedConfiguration()
+    {
+        var templatePath = _directory.WriteText("optional.template.json", """{ "Host": "${Database:Host}", "Optional": "${ Feature:Flag }" }""");
+        var reader = new ConfigurationItemReader(new DefaultToken());
+        reader.ReadKeys(File.ReadAllBytes(templatePath));
+        var resolver = new ConfigurationItemResolver(new DefaultToken(), reader, CreateProvider("dictionary"))
+        {
+            IgnoreUnresolvablePlaceholders = true,
+        };
+
+        var configuration = TemplateFile.LoadJson(TemplateFile.ResolveBytes(resolver, templatePath));
+
+        Assert.Equal("db.internal", configuration["Host"]);
+        Assert.Equal("${ Feature:Flag }", configuration["Optional"]);
+    }
+
+    [Fact]
     public void UnterminatedItemInJson_RunsToTheNextClosingBrace()
     {
         // JSON's own closing brace ends the item, so the key includes the JSON that follows it.

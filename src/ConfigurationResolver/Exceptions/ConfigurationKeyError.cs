@@ -19,4 +19,9 @@ public enum ConfigurationKeyError
     /// The value kept changing size while it was read, such as a secret file being rewritten.
     /// </summary>
     ValueUnstable,
+
+    /// <summary>
+    /// The key's value, resolved through the items in it, leads back to the same key.
+    /// </summary>
+    Cycle,
 }

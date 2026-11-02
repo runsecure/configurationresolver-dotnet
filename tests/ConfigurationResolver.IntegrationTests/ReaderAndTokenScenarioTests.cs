@@ -48,7 +48,9 @@ public sealed class ReaderAndTokenScenarioTests
     [InlineData("${} ${ } ${a}", new[] { "a" })]
     [InlineData("${a} ${unterminated", new[] { "a" })]
     [InlineData("${a}${b}", new[] { "a", "b" })]
-    public void ReadKeys_SkipsEmptyAndUnterminatedItems(string text, string[] expected)
+    [InlineData("$${a} ${b} $${", new[] { "b" })]
+    [InlineData("$$${a} $${b ${c}}", new[] { "c" })]
+    public void ReadKeys_SkipsEmptyUnterminatedAndEscapedItems(string text, string[] expected)
     {
         Assert.Equal(expected, _reader.ReadKeys(text.AsSpan()));
     }
@@ -73,6 +75,34 @@ public sealed class ReaderAndTokenScenarioTests
     }
 
     [Fact]
+    public void ReadKeys_WithCustomEscapeSequence_SkipsOnlyItsEscapedItems()
+    {
+        var withEscape = new ConfigurationItemReader(new CustomToken("{{", "}}", "\\"));
+        var withoutEscape = new ConfigurationItemReader(new CustomToken("{{", "}}"));
+
+        Assert.Equal(["b"], withEscape.ReadKeys(@"\{{a}} ${{b}}".AsSpan()));
+        Assert.Equal(["a", "b"], withoutEscape.ReadKeys(@"\{{a}} ${{b}}".AsSpan()));
+    }
+
+    [Fact]
+    public void ReadKeys_FromSeveralTexts_KeepsTheKeysOfAllOfThem()
+    {
+        _reader.ReadKeys("${old}".AsSpan());
+
+        var keys = _reader.ReadKeys(["${a} ${b}", "", "${c", "}${d}", "${a}"]);
+
+        Assert.Equal(["a", "b", "d", "a"], keys);
+        Assert.Equal(keys, _reader.Keys());
+    }
+
+    [Fact]
+    public void ReadKeys_FromSeveralTexts_NullArguments_Throw()
+    {
+        Assert.Throws<ArgumentNullException>(() => _reader.ReadKeys((IEnumerable<string>)null!));
+        Assert.Throws<ArgumentException>(() => _reader.ReadKeys(["${a}", null!]));
+    }
+
+    [Fact]
     public void Reader_NullArguments_Throw()
     {
         Assert.Throws<ArgumentNullException>(() => new ConfigurationItemReader(null!));
@@ -87,8 +117,16 @@ public sealed class ReaderAndTokenScenarioTests
 
         Assert.Equal(ConfigurationItemTokenBase.DefaultStartSequence, defaults.StartSequence);
         Assert.Equal(ConfigurationItemTokenBase.DefaultEndSequence, defaults.EndSequence);
+        Assert.Equal(ConfigurationItemTokenBase.DefaultEscapeSequence, defaults.EscapeSequence);
         Assert.Equal("<%", custom.StartSequence);
         Assert.Equal("%>", custom.EndSequence);
+        Assert.Null(custom.EscapeSequence);
+    }
+
+    [Fact]
+    public void Token_EmptyEscapeSequence_Throws()
+    {
+        Assert.Throws<ArgumentException>(() => new CustomToken("${", "}", ""));
     }
 
     [Theory]

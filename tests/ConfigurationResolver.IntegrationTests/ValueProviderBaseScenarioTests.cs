@@ -2,6 +2,7 @@ using System.Text;
 using ConfigurationResolver.Exceptions;
 using ConfigurationResolver.Interfaces;
 using ConfigurationResolver.Providers;
+using ConfigurationResolver.Tokens;
 
 namespace ConfigurationResolver.IntegrationTests;
 

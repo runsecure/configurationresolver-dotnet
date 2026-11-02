@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <Description>A ConfigurationResolver value provider backed by Microsoft.Extensions.Configuration, for a configuration root or a section.</Description>
+    <Description>Microsoft.Extensions.Configuration support for ConfigurationResolver: a value provider backed by a configuration root or section, and a configuration root that resolves the items in its values.</Description>
     <PackageTags>configuration;secrets;templating;resolver;microsoft-extensions-configuration</PackageTags>
   </PropertyGroup>
 
@@ -10,6 +10,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Configuration" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" />
   </ItemGroup>
 

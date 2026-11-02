@@ -73,15 +73,55 @@ public class ConfigurationItemReader : IConfigurationItemReader
     /// </summary>
     /// <remarks>
     /// Keys are trimmed of surrounding whitespace, and empty keys are skipped. A start sequence
-    /// with no matching end sequence is ignored.
+    /// with no matching end sequence is ignored, and so is a start sequence preceded by the token's
+    /// <see cref="ConfigurationItemTokenBase.EscapeSequence"/>.
     /// </remarks>
     /// <param name="text">The text to search.</param>
     /// <returns>The trimmed keys, in the order they appear.</returns>
     public IReadOnlyList<string> ReadKeys(ReadOnlySpan<char> text)
     {
         var keys = new List<string>();
+        AddKeys(text, keys);
+
+        _keys = keys;
+        return keys;
+    }
+
+    /// <summary>
+    /// Extracts the keys of the configuration items in each of several texts, such as the values of a
+    /// configuration, and keeps the keys from all of them.
+    /// </summary>
+    /// <remarks>
+    /// Each text is read on its own, so an item can't start in one text and end in the next.
+    /// </remarks>
+    /// <param name="texts">The texts to search.</param>
+    /// <returns>The trimmed keys, in the order they appear, text by text.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="texts"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException"><paramref name="texts"/> contains <see langword="null"/>.</exception>
+    public IReadOnlyList<string> ReadKeys(IEnumerable<string> texts)
+    {
+        ArgumentNullException.ThrowIfNull(texts);
+
+        var keys = new List<string>();
+        foreach (var text in texts)
+        {
+            if (text is null)
+            {
+                throw new ArgumentException("The texts cannot contain null.", nameof(texts));
+            }
+
+            AddKeys(text, keys);
+        }
+
+        _keys = keys;
+        return keys;
+    }
+
+    private void AddKeys(ReadOnlySpan<char> text, List<string> keys)
+    {
         var startSequence = _token.StartSequence.AsSpan();
         var endSequence = _token.EndSequence.AsSpan();
+        var escapeSequence = _token.EscapeSequence.AsSpan();
 
         while (true)
         {
@@ -91,7 +131,12 @@ public class ConfigurationItemReader : IConfigurationItemReader
                 break;
             }
 
+            var escaped = !escapeSequence.IsEmpty && text[..startIndex].EndsWith(escapeSequence, StringComparison.Ordinal);
             text = text[(startIndex + startSequence.Length)..];
+            if (escaped)
+            {
+                continue;
+            }
 
             var endIndex = text.IndexOf(endSequence, StringComparison.Ordinal);
             if (endIndex < 0)
@@ -107,8 +152,5 @@ public class ConfigurationItemReader : IConfigurationItemReader
 
             text = text[(endIndex + endSequence.Length)..];
         }
-
-        _keys = keys;
-        return keys;
     }
 }

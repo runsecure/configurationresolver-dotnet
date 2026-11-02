@@ -35,4 +35,11 @@ public interface IConfigurationItemReader
     /// <param name="text">The text to search.</param>
     /// <returns>The trimmed keys, in the order they appear.</returns>
     IReadOnlyList<string> ReadKeys(ReadOnlySpan<char> text);
+
+    /// <summary>
+    /// Extracts the keys of the configuration items in each of several texts, and keeps the keys from all of them.
+    /// </summary>
+    /// <param name="texts">The texts to search. Each is read on its own.</param>
+    /// <returns>The trimmed keys, in the order they appear, text by text.</returns>
+    IReadOnlyList<string> ReadKeys(IEnumerable<string> texts);
 }
