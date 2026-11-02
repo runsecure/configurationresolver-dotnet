@@ -1,9 +1,9 @@
-# Builds, tests, signs and packs every ConfigurationResolver NuGet package, then publishes
-# them as one versioned GitHub Release. Nothing is pushed to a NuGet feed yet.
+# Builds, tests, signs and packs every ConfigurationResolver NuGet package, publishes
+# them as one versioned GitHub Release, then pushes them to nuget.org.
 #
 # Triggered by pushing a version tag (vX.Y.Z, optionally with a pre-release
 # suffix such as v1.2.3-rc.1). Reuses this repo's scripts/ rather than
-# duplicating their logic here. Four jobs:
+# duplicating their logic here. Five jobs:
 #
 #   version  turns the tag into a package version; fails on a malformed tag,
 #            or one whose MAJOR.MINOR.PATCH isn't VersionPrefix in
@@ -18,6 +18,9 @@
 #            carry the signed assemblies, opens every package to verify them,
 #            and attests provenance of the signed files.
 #   publish  creates the GitHub Release from the sign job's output.
+#   nuget    pushes the same packages to nuget.org, after the GitHub Release
+#            exists. A version pushed to nuget.org can be unlisted but never
+#            deleted or replaced, so this runs last.
 #
 # The packages themselves are NOT NuGet-signed (see README.md, "Signing and
 # releases"): the assemblies inside them are Authenticode-signed.
@@ -39,6 +42,15 @@
 #     environment.
 #   - The "release" environment (Settings > Environments) restricted to tags
 #     matching v*, so only a release can sign.
+#
+# Publishing setup (nuget.org and GitHub):
+#   - A nuget.org Trusted Publishing policy for repository owner runsecure,
+#     repository configurationresolver-dotnet, workflow release.yml and
+#     environment release. The nuget job exchanges GitHub's OIDC token for a
+#     short-lived nuget.org API key - no stored nuget.org secret.
+#   - Secret NUGET_USER on the "release" environment: the nuget.org profile
+#     name (not email address, and not an organization) of the user who
+#     created the policy.
 name: Release
 
 on:
@@ -274,3 +286,47 @@ jobs:
           }
           gh release create $env:TAG $files --title $env:TAG --generate-notes @extra --repo $env:REPOSITORY
           if ($LASTEXITCODE -ne 0) { throw "gh release create failed (exit $LASTEXITCODE)" }
+
+  nuget:
+    needs: [version, publish]
+    runs-on: windows-2022
+    # The Trusted Publishing policy names this environment, so only a v* tag
+    # can obtain a nuget.org key.
+    environment: release
+    permissions:
+      contents: read
+      id-token: write # nuget.org Trusted Publishing (OIDC)
+    steps:
+      - name: Set up .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Download the signed release assets
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-assets
+          path: release-assets
+
+      # Exchanges this job's OIDC token for a nuget.org API key that is valid
+      # for one hour.
+      - name: Sign in to nuget.org
+        id: nuget-login
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+        with:
+          user: ${{ secrets.NUGET_USER }}
+
+      # Pushes each .nupkg; dotnet nuget push also pushes the .snupkg beside
+      # it to nuget.org's symbol server. --skip-duplicate makes a re-run safe
+      # after a partial push: versions already on nuget.org are left alone.
+      - name: Push to nuget.org
+        shell: powershell
+        env:
+          NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          foreach ($package in Get-ChildItem -Path release-assets -Filter *.nupkg -File) {
+            Write-Host "Pushing $($package.Name)"
+            dotnet nuget push $package.FullName --api-key $env:NUGET_API_KEY --source https://api.nuget.org/v3/index.json --skip-duplicate
+            if ($LASTEXITCODE -ne 0) { throw "dotnet nuget push $($package.Name) failed (exit $LASTEXITCODE)" }
+          }

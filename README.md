@@ -77,8 +77,11 @@ The tag must be `vMAJOR.MINOR.PATCH`, optionally with a pre-release suffix (`v0.
    and assemblies. Any failure fails the release; there is no unsigned fallback.
 3. **publish**: creates a GitHub Release with every `.nupkg`, `.snupkg` and `.sha256`. Versions
    `0.x`, and any with a pre-release suffix, are published as GitHub pre-releases.
-
-Nothing is pushed to a NuGet feed yet.
+4. **nuget** (in the `release` environment): pushes every `.nupkg`, with its `.snupkg`, to
+   nuget.org through Trusted Publishing: GitHub's OIDC token is exchanged for a short-lived
+   nuget.org key, so no nuget.org secret is stored. It runs last because a version on
+   nuget.org can be unlisted but never deleted or replaced. nuget.org treats only versions with a
+   pre-release suffix as pre-releases, so `0.9.0` is listed there as stable.
 
 ### Signing locally
 
